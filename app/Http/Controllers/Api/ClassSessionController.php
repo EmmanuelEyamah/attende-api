@@ -50,7 +50,7 @@ class ClassSessionController extends Controller
             ]);
 
             // Create default absent records for all enrolled students
-            $course = Course::findOrFail($request->course_id);
+            $course = Course::with('students')->findOrFail($request->course_id);
             foreach ($course->students as $student) {
                 AttendanceRecord::create([
                     'class_session_id' => $classSession->id,
@@ -62,7 +62,7 @@ class ClassSessionController extends Controller
 
             return ResponseHelper::success(1, 'Class session created successfully', $classSession, 201);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to create class session', [], 500);
+            return ResponseHelper::error(0, 'Failed to create class session: ' . $e->getMessage(), [], 500);
         }
     }
 
@@ -70,21 +70,46 @@ class ClassSessionController extends Controller
     {
         try {
             $classes = ClassSession::where('course_id', $courseId)
-                                 ->with(['creator', 'attendanceRecords'])
+                                 ->with(['creator', 'attendanceRecords.student', 'course.students'])
+                                 ->orderBy('date', 'desc')
+                                 ->orderBy('time', 'desc')
                                  ->get();
 
             return ResponseHelper::success(1, 'Classes retrieved successfully', $classes, 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to retrieve classes', [], 500);
+            return ResponseHelper::error(0, 'Failed to retrieve classes: ' . $e->getMessage(), [], 500);
         }
     }
 
     public function getClassAttendance($sessionId)
     {
         try {
-            $classSession = ClassSession::with(['course', 'attendanceRecords.student'])
-                                      ->findOrFail($sessionId);
+            // Get the class session with related course and students
+            $classSession = ClassSession::with(['course.students', 'attendanceRecords.student'])
+                                       ->findOrFail($sessionId);
 
+            // Get the enrolled students from the course
+            $course = $classSession->course;
+            $students = $course->students;
+
+            // Check for missing attendance records and create them for any student who doesn't have a record
+            foreach ($students as $student) {
+                $exists = AttendanceRecord::where('class_session_id', $sessionId)
+                                        ->where('student_id', $student->id)
+                                        ->exists();
+
+                if (!$exists) {
+                    AttendanceRecord::create([
+                        'class_session_id' => $sessionId,
+                        'student_id' => $student->id,
+                        'status' => 'absent',
+                        'marked_by' => Auth::id(),
+                    ]);
+                }
+            }
+
+            // Reload the class session with the newly created records
+            $classSession->load(['attendanceRecords.student']);
             $attendance = $classSession->attendanceRecords()->with('student')->get();
 
             return ResponseHelper::success(1, 'Attendance records retrieved successfully', [
@@ -92,7 +117,7 @@ class ClassSessionController extends Controller
                 'attendance' => $attendance
             ], 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to retrieve attendance records', [], 500);
+            return ResponseHelper::error(0, 'Failed to retrieve attendance records: ' . $e->getMessage(), [], 500);
         }
     }
 
@@ -121,7 +146,7 @@ class ClassSessionController extends Controller
 
             return ResponseHelper::success(1, 'Attendance marked successfully', $attendance, 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to mark attendance', [], 500);
+            return ResponseHelper::error(0, 'Failed to mark attendance: ' . $e->getMessage(), [], 500);
         }
     }
 
@@ -130,7 +155,7 @@ class ClassSessionController extends Controller
         $validator = Validator::make($request->all(), [
             'attendance' => 'required|array',
             'attendance.*.student_id' => 'required|exists:students,id',
-            'attendance.*.status' => 'required|in:present,absent',
+            'attendance.*.status' => 'required|in:present,absent,late',
         ]);
 
         if ($validator->fails()) {
@@ -140,7 +165,7 @@ class ClassSessionController extends Controller
         try {
             $records = [];
             foreach ($request->attendance as $record) {
-                AttendanceRecord::updateOrCreate(
+                $attendance = AttendanceRecord::updateOrCreate(
                     [
                         'class_session_id' => $sessionId,
                         'student_id' => $record['student_id'],
@@ -150,11 +175,19 @@ class ClassSessionController extends Controller
                         'marked_by' => Auth::id(),
                     ]
                 );
+                $records[] = $attendance;
             }
 
-            return ResponseHelper::success(1, 'Attendance marked successfully', [], 200);
+            // Get updated class session data with all attendance records
+            $classSession = ClassSession::with(['course.students', 'attendanceRecords.student'])
+                                      ->findOrFail($sessionId);
+
+            return ResponseHelper::success(1, 'Attendance marked successfully', [
+                'class_session' => $classSession,
+                'records' => $records
+            ], 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to mark attendance', [], 500);
+            return ResponseHelper::error(0, 'Failed to mark attendance: ' . $e->getMessage(), [], 500);
         }
     }
 }

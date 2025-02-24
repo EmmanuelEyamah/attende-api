@@ -15,9 +15,15 @@ class CourseController extends Controller
     public function index()
     {
         try {
+            // Get authenticated user ID
+            $userId = Auth::id();
+
+            // Filter courses by created_by (courses created by this user)
             $courses = Course::with('creator')
                             ->withCount('students')
+                            ->where('created_by', $userId)
                             ->get();
+
             return ResponseHelper::success(1, 'Courses retrieved successfully', $courses, 200);
         } catch (Exception $e) {
             return ResponseHelper::error(0, 'Failed to retrieve courses', [], 500);
@@ -64,12 +70,18 @@ class CourseController extends Controller
     public function show($id)
     {
         try {
+            // Get authenticated user ID
+            $userId = Auth::id();
+
+            // Find course by ID and ensure it belongs to the authenticated user
             $course = Course::with('creator')
                             ->withCount('students')
+                            ->where('created_by', $userId)
                             ->findOrFail($id);
+
             return ResponseHelper::success(1, 'Course retrieved successfully', $course, 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Course not found', [], 404);
+            return ResponseHelper::error(0, 'Course not found or unauthorized', [], 404);
         }
     }
 
@@ -88,24 +100,32 @@ class CourseController extends Controller
         }
 
         try {
-            $course = Course::findOrFail($id);
+            // Get authenticated user ID
+            $userId = Auth::id();
+
+            // Find course by ID and ensure it belongs to the authenticated user
+            $course = Course::where('created_by', $userId)->findOrFail($id);
             $course->update($request->all());
 
             return ResponseHelper::success(1, 'Course updated successfully', $course, 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to update course', [], 500);
+            return ResponseHelper::error(0, 'Failed to update course or unauthorized', [], 500);
         }
     }
 
     public function destroy($id)
     {
         try {
-            $course = Course::findOrFail($id);
+            // Get authenticated user ID
+            $userId = Auth::id();
+
+            // Find course by ID and ensure it belongs to the authenticated user
+            $course = Course::where('created_by', $userId)->findOrFail($id);
             $course->delete();
 
             return ResponseHelper::success(1, 'Course deleted successfully', [], 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to delete course', [], 500);
+            return ResponseHelper::error(0, 'Failed to delete course or unauthorized', [], 500);
         }
     }
 
@@ -123,13 +143,17 @@ class CourseController extends Controller
         }
 
         try {
-            $course = Course::findOrFail($id);
+            // Get authenticated user ID
+            $userId = Auth::id();
+
+            // Find course by ID and ensure it belongs to the authenticated user
+            $course = Course::where('created_by', $userId)->findOrFail($id);
             $course->status = $request->status;
             $course->save();
 
             return ResponseHelper::success(1, 'Course status updated successfully', $course, 200);
         } catch (Exception $e) {
-            return ResponseHelper::error(0, 'Failed to update course status', [], 500);
+            return ResponseHelper::error(0, 'Failed to update course status or unauthorized', [], 500);
         }
     }
 }
